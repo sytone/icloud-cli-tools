@@ -13,6 +13,8 @@ from pathlib import Path
 
 import toml
 
+from icloud_cli.security import ensure_parent, private_dir, private_file, private_open
+
 # XDG-compliant default paths
 DEFAULT_CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "icloud-cli"
 DEFAULT_DATA_DIR = (
@@ -57,6 +59,7 @@ class Config:
         path = config_path or DEFAULT_CONFIG_FILE
         config = cls(config_file=path)
 
+        private_file(path)
         if path.exists():
             data = toml.load(path)
             general = data.get("general", {})
@@ -86,7 +89,7 @@ class Config:
 
     def save(self) -> None:
         """Save config to TOML file."""
-        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_config_dir()
 
         data = {
             "general": {
@@ -112,11 +115,22 @@ class Config:
             },
         }
 
-        with open(self.config_file, "w") as f:
+        with private_open(self.config_file) as f:
             toml.dump(data, f)
 
     def ensure_dirs(self) -> None:
         """Create required directories."""
-        Path(self.session_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.cache_dir).mkdir(parents=True, exist_ok=True)
-        self.config_file.parent.mkdir(parents=True, exist_ok=True)
+        private_dir(Path(self.session_dir))
+        private_dir(Path(self.cache_dir))
+        private_file(self.config_file)
+        self._ensure_config_dir()
+        if Path(self.cache_dir) == DEFAULT_CACHE_DIR:
+            private_dir(DEFAULT_DATA_DIR)
+
+    def _ensure_config_dir(self) -> None:
+        # A custom --config may live in a shared directory; never chmod that
+        # directory or its unrelated contents. Only the default app dir is ours.
+        if self.config_file.parent == DEFAULT_CONFIG_DIR:
+            private_dir(DEFAULT_CONFIG_DIR)
+        else:
+            ensure_parent(self.config_file.parent)

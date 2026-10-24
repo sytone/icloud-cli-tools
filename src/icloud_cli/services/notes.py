@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import email
 import imaplib
+import ssl
 from datetime import datetime
 from email.mime.text import MIMEText
 from typing import Any
@@ -34,7 +35,9 @@ class NotesService:
     def _connect(self) -> imaplib.IMAP4_SSL:
         """Establish IMAP connection and login."""
         try:
-            conn = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+            conn = imaplib.IMAP4_SSL(
+                IMAP_HOST, IMAP_PORT, ssl_context=ssl.create_default_context()
+            )
             conn.login(self.apple_id, self.imap_password)
             return conn
         except imaplib.IMAP4.error as e:

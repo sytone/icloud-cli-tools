@@ -17,7 +17,9 @@ from pyicloud.exceptions import (
 )
 
 from icloud_cli.config import Config
+from icloud_cli.credentials import KEYRING_HELP, SecureKeyringError, configure_secure_keyring
 from icloud_cli.output import error, info, success, warning
+from icloud_cli.security import private_dir
 
 KEYRING_SERVICE = "icloud-cli-tools"
 KEYRING_IMAP_SERVICE = "icloud-cli-tools-imap"
@@ -27,8 +29,18 @@ class AuthManager:
     """Manages iCloud authentication, sessions, and credentials."""
 
     def __init__(self, config: Config):
+        configure_secure_keyring(keyring)
         self.config = config
         self._api: PyiCloudService | None = None
+
+    def _credential(self, operation: str, *args):
+        """Use only the selected store; never retry through another backend."""
+        try:
+            return getattr(keyring, operation)(*args)
+        except keyring.errors.PasswordDeleteError:
+            raise
+        except Exception as exc:
+            raise SecureKeyringError(KEYRING_HELP) from exc
 
     @property
     def api(self) -> PyiCloudService:
@@ -52,17 +64,17 @@ class AuthManager:
         self.config.save()
 
         # Get password from keyring or prompt
-        password = keyring.get_password(KEYRING_SERVICE, apple_id)
+        password = self._credential("get_password", KEYRING_SERVICE, apple_id)
         if not password:
             password = click.prompt("Password", hide_input=True)
             if click.confirm("Save password to system keyring?", default=True):
-                keyring.set_password(KEYRING_SERVICE, apple_id, password)
+                self._credential("set_password", KEYRING_SERVICE, apple_id, password)
                 success("Password saved to keyring.")
 
         # Authenticate
         try:
             session_dir = Path(self.config.session_dir)
-            session_dir.mkdir(parents=True, exist_ok=True)
+            private_dir(session_dir)
 
             self._api = PyiCloudService(
                 apple_id=apple_id,
@@ -190,20 +202,21 @@ class AuthManager:
         apple_id = self.config.apple_id
         if apple_id:
             try:
-                keyring.delete_password(KEYRING_SERVICE, apple_id)
+                self._credential("delete_password", KEYRING_SERVICE, apple_id)
                 info("Removed password from keyring.")
             except keyring.errors.PasswordDeleteError:
                 pass
 
             try:
-                keyring.delete_password(KEYRING_IMAP_SERVICE, apple_id)
+                self._credential("delete_password", KEYRING_IMAP_SERVICE, apple_id)
                 info("Removed IMAP password from keyring.")
             except keyring.errors.PasswordDeleteError:
                 pass
 
         # Clear session cookies
         session_dir = Path(self.config.session_dir)
-        if session_dir.exists():
+        if session_dir.exists() or session_dir.is_symlink():
+            private_dir(session_dir)
             for f in session_dir.iterdir():
                 f.unlink()
             info("Cleared session cookies.")
@@ -215,10 +228,10 @@ class AuthManager:
         """Return current authentication status."""
         apple_id = self.config.apple_id
         has_password = bool(
-            apple_id and keyring.get_password(KEYRING_SERVICE, apple_id)
+            apple_id and self._credential("get_password", KEYRING_SERVICE, apple_id)
         )
         has_imap_password = bool(
-            apple_id and keyring.get_password(KEYRING_IMAP_SERVICE, apple_id)
+            apple_id and self._credential("get_password", KEYRING_IMAP_SERVICE, apple_id)
         )
         has_session = self._has_cached_session()
 
@@ -246,7 +259,7 @@ class AuthManager:
         print()
 
         password = click.prompt("Enter app-specific password", hide_input=True)
-        keyring.set_password(KEYRING_IMAP_SERVICE, apple_id, password)
+        self._credential("set_password", KEYRING_IMAP_SERVICE, apple_id, password)
         self.config.imap_password_in_keyring = True
         self.config.save()
 
@@ -262,7 +275,7 @@ class AuthManager:
         if not apple_id:
             return None
 
-        password = keyring.get_password(KEYRING_IMAP_SERVICE, apple_id)
+        password = self._credential("get_password", KEYRING_IMAP_SERVICE, apple_id)
         if not password:
             return None
 
@@ -275,18 +288,18 @@ class AuthManager:
             error("Not logged in. Run 'icloud-cli login' first.")
             sys.exit(1)
 
-        password = keyring.get_password(KEYRING_SERVICE, apple_id)
+        password = self._credential("get_password", KEYRING_SERVICE, apple_id)
         if not password:
             # No saved password — prompt interactively
             warning("No stored password found.")
             password = click.prompt("Password", hide_input=True)
             if click.confirm("Save password to system keyring?", default=True):
-                keyring.set_password(KEYRING_SERVICE, apple_id, password)
+                self._credential("set_password", KEYRING_SERVICE, apple_id, password)
                 success("Password saved to keyring.")
 
         try:
             session_dir = Path(self.config.session_dir)
-            session_dir.mkdir(parents=True, exist_ok=True)
+            private_dir(session_dir)
 
             api = PyiCloudService(
                 apple_id=apple_id,
@@ -312,4 +325,5 @@ class AuthManager:
         session_dir = Path(self.config.session_dir)
         if not session_dir.exists():
             return False
+        private_dir(session_dir)
         return any(session_dir.iterdir())

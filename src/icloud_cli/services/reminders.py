@@ -21,6 +21,7 @@ from dateutil import parser as dateutil_parser
 from pyicloud import PyiCloudService
 
 from icloud_cli.config import Config
+from icloud_cli.security import private_dir, private_file, private_open
 
 
 class RemindersService:
@@ -33,7 +34,8 @@ class RemindersService:
 
         # Cursor-based incremental sync state
         self._cache_dir = Path(config.cache_dir) / "reminders"
-        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        private_dir(Path(config.cache_dir))
+        private_dir(self._cache_dir)
         self._state_file = self._cache_dir / "state.json"
 
     def list_reminders(
@@ -118,6 +120,7 @@ class RemindersService:
 
     def _load_sync_state(self) -> tuple[str, list[dict[str, Any]]] | None:
         """Load a complete cursor/data generation, or request a full sync."""
+        private_file(self._state_file)
         if not self._state_file.exists():
             return None
         try:
@@ -150,7 +153,9 @@ class RemindersService:
             f".{self._state_file.name}.{uuid.uuid4().hex}.tmp"
         )
         try:
-            temp_file.write_text(json.dumps(state, indent=2))
+            private_file(self._state_file)
+            with private_open(temp_file) as f:
+                f.write(json.dumps(state, indent=2))
             temp_file.replace(self._state_file)
         finally:
             if temp_file.exists():
