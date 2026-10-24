@@ -183,3 +183,51 @@ tool is not affiliated with or endorsed by Apple Inc.
 ## License
 
 [MIT](LICENSE)
+
+## Security and local state
+
+- **Web API login uses your real Apple ID password and Apple's 2FA**, not an
+  app-specific password. Notes IMAP uses a separate app-specific password.
+  Notes connections verify the server certificate chain and hostname using the
+  platform's default TLS trust store; there is no insecure TLS fallback.
+- At application startup, credential storage is explicitly restricted to the
+  built-in `keyring` Secret Service backend on Linux, macOS Keychain, or Windows
+  Credential Manager. Backend discovery, `PYTHON_KEYRING_BACKEND`, keyring config
+  overrides, third-party plugins (including `keyrings.alt`), and chained fallback
+  stores are deliberately not used. Selection checks availability only; it does
+  not read passwords. Credential commands can subsequently access the selected
+  system store and may trigger its unlock prompt.
+- **Headless operation fails closed** if the secure store is missing, unavailable,
+  or locked: it never silently switches to plaintext storage. On Linux, install
+  SecretStorage and run/unlock a Secret Service such as GNOME Keyring in the
+  same user's D-Bus session. Services and cron jobs need access to that unlocked
+  user store too. On macOS unlock Keychain; on Windows ensure Credential Manager
+  is available. Commands that do not need credentials can still run without a
+  working store. No plaintext workaround is supported.
+- On POSIX systems the CLI sets a process-wide `umask 077`, including for
+  dependency-created session/cookie files. Dedicated app configuration, session,
+  and cache directories are restricted to `0700`; existing config, session, and
+  cache files are tightened to `0600`, and app-written files are created with
+  `0600`. Custom session/cache directories must be dedicated to this app: their
+  contents are recursively hardened. A custom `--config` file is hardened but
+  its existing parent directory is not, because it may hold unrelated files.
+  Existing XDG/home ancestors are not chmod'ed. Sensitive paths containing
+  symlinks, hard-linked files, or special files are rejected. Use real directories
+  instead of symlinks for these paths.
+- These modes are not encryption. On Windows, POSIX modes do not provide the
+  same protection: use private user-profile directories with appropriate Windows
+  ACLs. Protect backups and local disks. Path checks reduce link hazards but do
+  not guarantee safety against concurrent path replacement by another process
+  running as your user or against a hostile/shared parent directory.
+- **Logout is not a cache wipe.** It removes stored passwords and session cookies
+  when the keyring is accessible, but retains configuration and synced data
+  (including reminder state, calendar/Notes metadata and device locations).
+  Stop any running sync process and remove the configured cache directory
+  separately if you need to remove those residual records. Logout cannot revoke
+  copies in backups, securely erase disk blocks, or remotely revoke Apple's
+  sessions/app-specific passwords.
+- These hardening changes are maintained in the
+  [sytone fork](https://github.com/sytone/icloud-cli-tools). A PyPI or upstream
+  reinstall may not include local patches. Keep your patched checkout/virtualenv,
+  review diffs when updating, and rerun the regression suite after dependency or
+  upstream upgrades; do not assume local changes survive replacement installs.

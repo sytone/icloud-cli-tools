@@ -5,6 +5,7 @@ Main CLI entry point using Click with subcommand groups.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import click
@@ -60,6 +61,8 @@ def cli(ctx: AppContext, format: str | None, config: str | None, verbose: bool):
     Manage your Calendar, Reminders, Notes, and Find My devices
     right from the terminal.
     """
+    # Intentionally process-wide: dependency cookie/session writes inherit it.
+    os.umask(0o077)
     config_path = Path(config) if config else None
     ctx.config = Config.load(config_path)
     ctx.config.ensure_dirs()

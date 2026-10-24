@@ -18,6 +18,7 @@ from typing import Any
 from icloud_cli.auth import AuthManager
 from icloud_cli.config import Config
 from icloud_cli.output import error, info, success, warning
+from icloud_cli.security import private_dir, private_open
 
 PID_FILE_NAME = "icloud-cli-daemon.pid"
 
@@ -25,7 +26,7 @@ PID_FILE_NAME = "icloud-cli-daemon.pid"
 def sync_all(auth: AuthManager, config: Config) -> None:
     """Run a one-shot sync of all services to local cache."""
     cache_dir = Path(config.cache_dir)
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    private_dir(cache_dir)
 
     info("Syncing iCloud data...")
 
@@ -110,8 +111,9 @@ def start_daemon(auth: AuthManager, config: Config) -> None:
     info("Press Ctrl+C to stop, or use 'icloud-cli daemon stop'.")
 
     # Write PID file
-    pid_file.parent.mkdir(parents=True, exist_ok=True)
-    pid_file.write_text(str(os.getpid()))
+    private_dir(pid_file.parent)
+    with private_open(pid_file) as f:
+        f.write(str(os.getpid()))
 
     # Handle graceful shutdown
     def _shutdown(signum, frame):
@@ -193,6 +195,6 @@ def get_daemon_status(config: Config) -> dict[str, Any]:
 
 def _save_cache(path: Path, data: Any) -> None:
     """Save data to a JSON cache file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w") as f:
+    private_dir(path.parent)
+    with private_open(path) as f:
         json.dump(data, f, indent=2, default=str)
